@@ -1112,6 +1112,87 @@ String DisplayServerWindows::clipboard_get() const {
 	return ret;
 }
 
+void DisplayServerWindows::clipboard_set_image(const Ref<Image> &p_image) {
+	Vector<uint8_t> rgba8_image_data;
+
+	if (p_image->get_format() == Image::FORMAT_RGBA8) {
+		rgba8_image_data = p_image->get_data();
+	} else {
+		const Ref<Image> non_rgba8_image = p_image->duplicate();
+		if (non_rgba8_image->is_compressed()) {
+			const Error decompression_error = non_rgba8_image->decompress();
+			ERR_FAIL_COND_MSG(decompression_error, "Unable to decompress image and therefore set clipboard.");
+		}
+		non_rgba8_image->convert(Image::FORMAT_RGBA8);
+		const Ref<Image> &converted_rgba8_image = non_rgba8_image;
+		rgba8_image_data = converted_rgba8_image->get_data();
+	}
+
+	const int image_width = p_image->get_width();
+	const int image_height = p_image->get_height();
+	const size_t bitmap_info_colors_length = image_height * image_width * 4;
+	const size_t bitmap_info_length = sizeof(BITMAPINFOHEADER) + bitmap_info_colors_length;
+
+	HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bitmap_info_length);
+	ERR_FAIL_COND_MSG(mem == nullptr, "Unable to allocate memory and therefore set clipboard.");
+
+	BITMAPINFO *bitmap_info = static_cast<BITMAPINFO *>(GlobalLock(mem));
+	{
+		BITMAPINFOHEADER *bitmap_info_header = &bitmap_info->bmiHeader;
+		bitmap_info_header->biSize = sizeof(BITMAPINFOHEADER);
+		bitmap_info_header->biWidth = image_width;
+		bitmap_info_header->biHeight = image_height;
+		bitmap_info_header->biPlanes = 1;
+		bitmap_info_header->biBitCount = 32;
+		bitmap_info_header->biCompression = BI_RGB;
+		bitmap_info_header->biSizeImage = bitmap_info_colors_length;
+		bitmap_info_header->biXPelsPerMeter = 0;
+		bitmap_info_header->biYPelsPerMeter = 0;
+		bitmap_info_header->biClrUsed = 0;
+		bitmap_info_header->biClrImportant = 0;
+	}
+
+	uint8_t *write = reinterpret_cast<uint8_t *>(&bitmap_info->bmiColors);
+	const uint8_t *read = rgba8_image_data.ptr();
+
+	const int BMP_GREEN_CHANNEL = 0, RGBA_RED_CHANNEL = 0;
+	const int BMP_BLUE_CHANNEL = 1, RGBA_BLUE_CHANNEL = 1;
+	const int BMP_RED_CHANNEL = 2, RGBA_GREEN_CHANNEL = 2;
+	const int BMP_RESERVE_CHANNEL = 3, RGBA_ALPHA_CHANNEL = 3;
+
+	for (int y = 0; y < image_height; y++) {
+		const int mirrored_y = image_height - y - 1;
+		for (int x = 0; x < image_width; x++) {
+			const uint8_t *read_px = &read[(mirrored_y * image_width + x) * 4];
+			uint8_t *write_px = &write[(y * image_width + x) * 4];
+			write_px[BMP_RED_CHANNEL] = read_px[RGBA_RED_CHANNEL];
+			write_px[BMP_BLUE_CHANNEL] = read_px[RGBA_BLUE_CHANNEL];
+			write_px[BMP_GREEN_CHANNEL] = read_px[RGBA_GREEN_CHANNEL];
+			write_px[BMP_RESERVE_CHANNEL] = read_px[RGBA_ALPHA_CHANNEL];
+		}
+	}
+
+	GlobalUnlock(mem);
+
+	_THREAD_SAFE_METHOD_
+
+	if (!OpenClipboard(windows[DisplayServerEnums::MAIN_WINDOW_ID].hWnd)) {
+		GlobalFree(mem);
+		ERR_FAIL_MSG("Unable to open clipboard.");
+	}
+	if (!EmptyClipboard()) {
+		GlobalFree(mem);
+		CloseClipboard();
+		ERR_FAIL_MSG("Unable to clear clipboard.");
+	}
+	if (SetClipboardData(CF_DIB, mem) == nullptr) {
+		GlobalFree(mem);
+		CloseClipboard();
+		ERR_FAIL_MSG("Unable to set clipboard.");
+	}
+	CloseClipboard();
+}
+
 Ref<Image> DisplayServerWindows::clipboard_get_image() const {
 	Ref<Image> image;
 	if (!windows.has(last_focused_window)) {

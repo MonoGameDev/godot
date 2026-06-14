@@ -165,6 +165,7 @@ public:
 	void mouse_set_mode_override_enabled(bool p_override_enabled) override {}
 	Point2i mouse_get_position() const override { return Point2i(); }
 	void clipboard_set(const String &p_text) override {}
+	void clipboard_set_image(const Ref<Image> &p_image) override {}
 	void clipboard_set_primary(const String &p_text) override {}
 
 	void virtual_keyboard_show(const String &p_existing_text, const Rect2 &p_screen_rect = Rect2(), DisplayServerEnums::VirtualKeyboardType p_type = DisplayServerEnums::KEYBOARD_TYPE_DEFAULT, int p_max_length = -1, int p_cursor_start = -1, int p_cursor_end = -1) override {}
